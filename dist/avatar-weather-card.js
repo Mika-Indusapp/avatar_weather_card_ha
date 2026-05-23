@@ -1,12 +1,115 @@
+// ==========================================
+// 1. L'ÉDITEUR VISUEL (Formulaire de configuration)
+// ==========================================
+class AvatarWeatherCardEditor extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+  }
+
+  // Home Assistant passe la configuration actuelle à l'éditeur
+  setConfig(config) {
+    this._config = config;
+  }
+
+  // Home Assistant passe l'objet global HASS (pour l'accès aux entités)
+  set hass(hass) {
+    this._hass = hass;
+    this.render();
+  }
+
+  // Rendu du formulaire graphique
+  render() {
+    if (!this._hass || !this._config) return;
+
+    // Définition du schéma ha-form pour générer automatiquement les champs
+    const schema = [
+      {
+        name: "entity",
+        selector: { entity: { domain: "weather" } }, // Filtre uniquement les météos
+        required: true,
+      },
+      {
+        name: "title",
+        selector: { text: {} }, // Champ texte libre
+      },
+      {
+        name: "forecast_day",
+        selector: {
+          select: {
+            options: [
+              { value: "0", label: "Actuelle / Aujourd'hui" },
+              { value: "1", label: "Demain (Prévision J+1)" },
+              { value: "2", label: "Après-demain (Prévision J+2)" }
+            ]
+          }
+        }
+      }
+    ];
+
+    this.shadowRoot.innerHTML = `
+      <div class="card-config">
+        <ha-form
+          .hass="${this._hass}"
+          .data="${this._config}"
+          .schema="${schema}"
+          .computeLabel="${(schema) => this._computeLabel(schema)}"
+        ></ha-form>
+      </div>
+    `;
+
+    // Écouteur d'événement : quand l'utilisateur change une valeur dans l'interface
+    this.shadowRoot.querySelector("ha-form").addEventListener("value-changed", (ev) => {
+      const config = ev.detail.value;
+      // On renvoie la nouvelle configuration à Home Assistant
+      const event = new CustomEvent("config-changed", {
+        detail: { config },
+        bubbles: true,
+        composed: true,
+      });
+      this.dispatchEvent(event);
+    });
+  }
+
+  // Personnalisation des labels affichés dans l'interface de configuration
+  _computeLabel(schema) {
+    const labels = {
+      entity: "Entité Météo (Weather)",
+      title: "Titre de la carte",
+      forecast_day: "Temporalité de l'avatar"
+    };
+    return labels[schema.name] || schema.name;
+  }
+}
+
+// Enregistrement de l'éditeur auprès de Home Assistant
+customElements.define("avatar-weather-card-editor", AvatarWeatherCardEditor);
+
+
+// ==========================================
+// 2. LA CARTE PRINCIPALE (Affichage de l'Avatar)
+// ==========================================
 class AvatarWeatherCard extends HTMLElement {
   
   constructor() {
     super();
-    // Création d'un Shadow DOM pour isoler les styles CSS de la carte
     this.attachShadow({ mode: 'open' });
   }
 
-  // Configuration de la carte définie par l'utilisateur dans Lovelace
+  // Indique à Home Assistant quel composant utiliser pour l'édition visuelle
+  static getConfigElement() {
+    return document.createElement("avatar-weather-card-editor");
+  }
+
+  // Configuration par défaut si l'utilisateur ajoute la carte sans rien toucher
+  static getStubConfig() {
+    return {
+      entity: "",
+      title: "Mon Avatar Météo",
+      forecast_day: "0"
+    };
+  }
+
   setConfig(config) {
     if (!config.entity) {
       throw new Error("Veuillez définir une entité météo (entity)");
@@ -14,13 +117,11 @@ class AvatarWeatherCard extends HTMLElement {
     this.config = config;
   }
 
-  // Cette méthode est appelée automatiquement par Home Assistant dès que l'état change
   set hass(hass) {
     this._hass = hass;
     const entityId = this.config.entity;
     const stateObj = hass.states[entityId];
 
-    // Sécurité si l'entité météo n'existe pas ou est mal orthographiée
     if (!stateObj) {
       this.shadowRoot.innerHTML = `
         <div style="padding: 16px; color: red; background: white; border-radius: 4px;">
@@ -30,12 +131,23 @@ class AvatarWeatherCard extends HTMLElement {
       return;
     }
 
-    // Récupération de l'état (ex: 'sunny', 'rainy') et conversion vers notre classe de vêtement
-    const weatherState = stateObj.state;
+    // Détermination de l'état météo selon le jour choisi (Actuel vs Prévisions)
+    let weatherState = stateObj.state;
+    const targetDay = parseInt(this.config.forecast_day || "0", 10);
+
+    // Si l'utilisateur a choisi un jour de prévision (J+1 ou J+2)
+    if (targetDay > 0) {
+      // On cherche les prévisions dans les données collectées par HA
+      // Note: Compatible avec les attributs classiques et le cache d'entité
+      const forecast = stateObj.attributes.forecast;
+      if (forecast && forecast.length >= targetDay) {
+        weatherState = forecast[targetDay - 1].condition;
+      }
+    }
+
     const weatherClass = this.getWeatherClass(weatherState);
     const title = this.config.title || '';
 
-    // Injection du style CSS et du code SVG dans le Shadow DOM
     this.shadowRoot.innerHTML = `
       <style>
         :host {
@@ -60,14 +172,14 @@ class AvatarWeatherCard extends HTMLElement {
           height: 320px;
         }
         
-        /* 1. MASQUAGE PAR DÉFAUT DE TOUTES LES COUCHES OPTIONNELLES */
+        /* MASQUAGE PAR DÉFAUT DES COUCHES OPTIONNELLES */
         .meteo-soleil, .meteo-pluie, .meteo-vent, 
         .vetement-chaud, .vetement-tempere, .vetement-coupevent, .vetement-froid,
         .accessoire-bonnet {
           display: none;
         }
 
-        /* 2. LOGIQUE D'AFFICHAGE DYNAMIQUE SELON LA CLASSE APPLIQUÉE À LA DIV PARENTE */
+        /* LOGIQUE D'AFFICHAGE DYNAMIQUE */
         .state-sunny .meteo-soleil, .state-sunny .vetement-chaud { display: block; }
         .state-temperate .vetement-tempere { display: block; }
         .state-windy .vetement-coupevent, .state-windy .meteo-vent { display: block; }
@@ -80,18 +192,14 @@ class AvatarWeatherCard extends HTMLElement {
         <div class="avatar-container state-${weatherClass}">
           
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 300" width="100%" height="100%">
-            
             <g id="corps-de-base">
               <rect x="85" y="190" width="10" height="70" fill="#D7CCC8" rx="2"/>
               <rect x="105" y="190" width="10" height="70" fill="#D7CCC8" rx="2"/>
               <ellipse cx="90" cy="260" rx="8" ry="4" fill="#37474F" />
               <ellipse cx="110" cy="260" rx="8" ry="4" fill="#37474F" />
-              
               <path d="M 130 110 Q 150 120 150 155" stroke="#FFD54F" stroke-width="10" stroke-linecap="round" fill="none" />
               <path d="M 70 110 Q 55 130 55 165" stroke="#FFD54F" stroke-width="10" stroke-linecap="round" fill="none" />
-              
               <path d="M 72 100 L 128 100 L 122 150 L 78 150 Z" fill="#E0E0E0" />
-              
               <circle cx="100" cy="70" r="25" fill="#FFD54F" />
               <circle cx="92" cy="68" r="2.5" fill="#333" />
               <circle cx="108" cy="68" r="2.5" fill="#333" />
@@ -109,7 +217,8 @@ class AvatarWeatherCard extends HTMLElement {
               <path d="M 72 100 Q 58 122 56 150" stroke="#D4A373" stroke-width="12" stroke-linecap="round" fill="none" />
               <path d="M 128 100 Q 146 118 148 145" stroke="#D4A373" stroke-width="12" stroke-linecap="round" fill="none" />
               <rect x="75" y="145" width="50" height="75" fill="#78909C" />
-              <path d="M 70 100 L 130 100 L 125 150 L 75 150 Z" fill="#EEEEEE" /> <path d="M 68 98 L 92 98 L 90 150 L 68 145 Z" fill="#D4A373" />
+              <path d="M 70 100 L 130 100 L 125 150 L 75 150 Z" fill="#EEEEEE" />
+              <path d="M 68 98 L 92 98 L 90 150 L 68 145 Z" fill="#D4A373" />
               <path d="M 132 98 L 108 98 L 110 150 L 132 145 Z" fill="#D4A373" />
             </g>
           
@@ -158,7 +267,6 @@ class AvatarWeatherCard extends HTMLElement {
     `;
   }
 
-  // Correspondance entre les états météo natifs de HA et nos 5 visuels majeurs
   getWeatherClass(state) {
     const mapping = {
       'sunny': 'sunny',
@@ -174,7 +282,7 @@ class AvatarWeatherCard extends HTMLElement {
       'partlycloudy': 'temperate',
       'fog': 'temperate'
     };
-    return mapping[state] || 'temperate'; // 'temperate' renvoyé par défaut si état inconnu
+    return mapping[state] || 'temperate';
   }
 
   getCardSize() {
@@ -182,5 +290,5 @@ class AvatarWeatherCard extends HTMLElement {
   }
 }
 
-// Enregistrement final du composant personnalisé Lovelace
+// Enregistrement final de la carte principale
 customElements.define("avatar-weather-card", AvatarWeatherCard);
