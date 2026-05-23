@@ -1,0 +1,6 @@
+{
+  "name": "Avatar Weather Card",
+  "type": "plugin",
+  "filename": "avatar-weather-card.js",
+  "render_readme": true
+}
