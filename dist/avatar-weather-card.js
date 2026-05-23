@@ -78,10 +78,13 @@ class AvatarWeatherCard extends HTMLElement {
   static getStubConfig() {
     return { entity: "", title: "Mon Avatar Météo", forecast_day: "0" };
   }
-
+  
   setConfig(config) {
-    if (!config.entity) throw new Error("Veuillez définir une entité météo");
-    this.config = config;
+    this.config = {
+      title: "Mon Avatar Météo",
+      forecast_day: "0",
+      ...config
+    };
   }
 
   set hass(hass) {
