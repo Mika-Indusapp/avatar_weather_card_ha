@@ -1,24 +1,38 @@
-export class AvatarWeatherCardEditor extends HTMLElement {
+import { LitElement, html, css } from 'lit';
+
+export class AvatarWeatherCardEditor extends LitElement {
+  
+  static get properties() {
+    return {
+      hass: { type: Object },
+      _config: { type: Object }
+    };
+  }
+
   constructor() {
     super();
-    this.attachShadow({ mode: 'open' });
+    this._config = {};
   }
 
   setConfig(config) {
-    this._config = config;
-  }
-
-  set hass(hass) {
-    this._hass = hass;
-    this.render();
+    this._config = config || {};
   }
 
   render() {
-    if (!this._hass || !this._config) return;
+    if (!this.hass || !this._config) {
+      return html``;
+    }
 
+    // Le schéma automatique : Home Assistant va dessiner lui-même les composants parfaits
     const schema = [
-      { name: "entity", selector: { entity: { domain: "weather" } }, required: true },
-      { name: "title", selector: { text: {} } },
+      { 
+        name: "entity", 
+        selector: { entity: { domain: "weather" } } 
+      },
+      { 
+        name: "title", 
+        selector: { text: {} } 
+      },
       {
         name: "forecast_day",
         selector: {
@@ -33,25 +47,52 @@ export class AvatarWeatherCardEditor extends HTMLElement {
       }
     ];
 
-    this.shadowRoot.innerHTML = `
+    return html`
       <div class="card-config">
         <ha-form
-          .hass="${this._hass}"
-          .data="${this._config}"
-          .schema="${schema}"
-          .computeLabel="${(s) => this._computeLabel(s)}"
+          .hass=${this.hass}
+          .data=${this._config}
+          .schema=${schema}
+          .computeLabel=${this._computeLabel}
+          @value-changed=${this._valueChanged}
         ></ha-form>
       </div>
     `;
-
-    this.shadowRoot.querySelector("ha-form").addEventListener("value-changed", (ev) => {
-      const config = ev.detail.value;
-      this.dispatchEvent(new CustomEvent("config-changed", { detail: { config }, bubbles: true, composed: true }));
-    });
   }
 
+  // Permet de donner un joli nom en français aux champs du formulaire
   _computeLabel(schema) {
-    const labels = { entity: "Entité Météo", title: "Titre de la carte", forecast_day: "Temporalité" };
+    const labels = {
+      entity: "Entité Météo",
+      title: "Titre de la carte",
+      forecast_day: "Temporalité de l'avatar"
+    };
     return labels[schema.name] || schema.name;
   }
+
+  // Reçoit les modifications de ha-form et les renvoie proprement à Lovelace
+  _valueChanged(ev) {
+    ev.stopPropagation();
+    const newConfig = ev.detail.value;
+
+    this.dispatchEvent(
+      new CustomEvent("config-changed", {
+        detail: { config: newConfig },
+        bubbles: true,
+        composed: true
+      })
+    );
+  }
+
+  static get styles() {
+    return css`
+      .card-config {
+        padding: 16px 0;
+      }
+    `;
+  }
+}
+
+if (!customElements.get("avatar-weather-card-editor")) {
+  customElements.define("avatar-weather-card-editor", AvatarWeatherCardEditor);
 }

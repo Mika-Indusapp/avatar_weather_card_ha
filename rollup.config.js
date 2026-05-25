@@ -1,10 +1,12 @@
-import { nodeResolve } from '@rollup/plugin-node-resolve';
+import nodeResolve from '@rollup/plugin-node-resolve';
 
 export default {
-  input: 'src/main.js', // Ton point d'entrée
+  input: 'src/main.js',
   output: {
-    file: 'dist/avatar-weather-card.js', // Le fichier unique pour HACS
-    format: 'es',
+    file: 'dist/avatar-weather-card.js',
+    format: 'es'
   },
-  plugins: [nodeResolve()],
+  plugins: [
+    nodeResolve()
+  ]
 };
