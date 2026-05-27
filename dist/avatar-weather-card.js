@@ -199,79 +199,90 @@ const avatarSVG = `
   </svg>
 `;
 
-// ==========================================
-//          LOGIQUE MÉTIER DE L'AVATAR
-// ==========================================
+// Enregistrement Lovelace
+window.customCards = window.customCards || [];
+if (!window.customCards.some(c => c.type === "avatar-weather-card")) {
+  window.customCards.push({
+    type: "avatar-weather-card",
+    name: "Avatar Weather Card",
+    description: "Un personnage qui s'habille selon la météo.",
+    preview: true,
+  });
+}
 
+// Extraction robuste des données météo
 function getWeatherData(hass, config) {
   const entityId = config.entity;
   if (!entityId || !hass.states[entityId]) return null;
   const stateObj = hass.states[entityId];
 
+  // 1. Valeurs par défaut (J+0)
   let condition = stateObj.state;
-  let temperature = parseFloat(stateObj.state === 'unknown' ? 0 : stateObj.properties?.temperature || stateObj.attributes.temperature || 0);
   
+  // Sécurisation de la température J+0 : on cherche partout où elle peut se cacher
+  let temperature = 0;
+  if (stateObj.attributes && stateObj.attributes.temperature !== undefined) {
+    temperature = parseFloat(stateObj.attributes.temperature);
+  } else if (!isNaN(parseFloat(stateObj.state))) {
+    temperature = parseFloat(stateObj.state);
+  }
+
   const targetDay = parseInt(config.forecast_day || "0", 10);
 
-  // Si on cherche J+1 ou J+2, on va fouiller dans les prévisions
-  if (targetDay > 0 && stateObj.attributes.forecast && stateObj.attributes.forecast.length >= targetDay) {
+  // 2. Si prévision J+1 ou J+2, on extrait depuis le tableau forecast
+  if (targetDay > 0 && stateObj.attributes && stateObj.attributes.forecast && stateObj.attributes.forecast.length >= targetDay) {
     const forecast = stateObj.attributes.forecast[targetDay - 1];
     condition = forecast.condition;
-    // On prend la température maximale prévue pour la journée cible
+    // Sur les prévisions, c'est toujours la température maximale de la journée
     temperature = parseFloat(forecast.temperature);
   }
+
+  // Si le calcul a échoué et donne NaN, on force à 15 par sécurité pour éviter les plantages
+  if (isNaN(temperature)) temperature = 15;
 
   return { condition, temperature };
 }
 
+// Génération des classes CSS propres
 function generateAvatarClasses(condition, temp) {
   let classes = [];
 
-  // 1. Logique des vêtements de base selon la température
+  // Choix du vêtement de base selon la température
   if (temp < 10) {
-    classes.push('vetement-froid');
+    classes.push('state-froid');
   } else if (temp >= 10 && temp <= 20) {
-    // Règle spéciale : si du vent est prévu entre 10 et 20°C, on met le coupe-vent
     if (condition === 'windy' || condition === 'windy-variant') {
-      classes.push('vetement-coupevent');
+      classes.push('state-coupevent');
     } else {
-      classes.push('vetement-tempere');
+      classes.push('state-tempere');
     }
   } else if (temp > 20) {
-    classes.push('vetement-chaud');
+    classes.push('state-chaud');
   }
 
-  // 2. Ajout de l'accessoire bonnet si en dessous de 5°C
+  // Accessoire Bonnet
   if (temp < 5) {
-    classes.push('accessoire-bonnet');
+    classes.push('state-bonnet');
   }
 
-  // 3. Ajout des décors météo selon le statut de l'entité
+  // Décors météo
   if (condition === 'sunny' || condition === 'clear-night') {
-    classes.push('meteo-soleil');
+    classes.push('state-soleil');
   }
   if (condition === 'rainy' || condition === 'pouring' || condition === 'hail') {
-    classes.push('meteo-pluie');
+    classes.push('state-pluie');
   }
   if (condition === 'windy' || condition === 'windy-variant') {
-    classes.push('meteo-vent');
+    classes.push('state-vent');
   }
 
-  // Retourne la liste des classes séparées par un espace (ex: "vetement-froid accessoire-bonnet meteo-soleil")
   return classes.join(' ');
 }
 
-// ==========================================
-//          COMPOSANT CARTE PRINCIPAL
-// ==========================================
-
-class AvatarWeatherCard extends i {
-  
-  static get properties() {
-    return {
-      hass: { type: Object },
-      _config: { type: Object }
-    };
+class AvatarWeatherCard extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
   }
 
   static getConfigElement() {
@@ -279,125 +290,99 @@ class AvatarWeatherCard extends i {
   }
 
   static getStubConfig() {
-    return {
-      entity: "",
-      title: "", 
-      forecast_day: "0"
-    };
+    return { entity: "", title: "", forecast_day: "0" };
   }
-
+  
   setConfig(config) {
     if (!config.entity) {
       throw new Error("Veuillez sélectionner une entité météo.");
     }
-    this._config = config;
+    this.config = config;
   }
 
-  render() {
-    if (!this.hass || !this._config) return b``;
-
-    const entityId = this._config.entity;
-    const stateObj = this.hass.states[entityId];
+  set hass(hass) {
+    this._hass = hass;
+    const entityId = this.config.entity;
+    const stateObj = hass.states[entityId];
 
     if (!stateObj) {
-      return b`
-        <ha-card>
-          <div class="error" style="padding: 16px; color: var(--error-color);">
-            Entité introuvable : ${entityId}
-          </div>
-        </ha-card>
-      `;
+      this.shadowRoot.innerHTML = `<div style="color: red; padding: 16px;">Entité introuvable : ${entityId}</div>`;
+      return;
     }
 
-    // Récupération des données météo calculées (température + statut)
-    const weatherData = getWeatherData(this.hass, this._config);
-    
-    let activeClasses = "";
-    if (weatherData) {
-      activeClasses = generateAvatarClasses(weatherData.condition, weatherData.temperature);
-    }
+    const weatherData = getWeatherData(hass, this.config);
+    const activeClasses = weatherData ? generateAvatarClasses(weatherData.condition, weatherData.temperature) : "";
+    const title = this.config.title || '';
 
-    const hasTitle = this._config.title && this._config.title.trim() !== "";
+    this.shadowRoot.innerHTML = `
+      <style>
+        :host { 
+          display: block; 
+        }
+        .card-container { 
+          background: var(--ha-card-background, var(--card-background-color, white)); 
+          border-radius: var(--ha-card-border-radius, 12px); 
+          box-shadow: var(--ha-card-box-shadow, none);
+          border: var(--ha-card-border-width, 1px) solid var(--ha-card-border-color, var(--divider-color, #e0e0e0));
+          box-sizing: border-box;
+        }
+        .card-title { 
+          font-size: 16px; 
+          padding: 16px 16px 0px 16px;
+          font-weight: bold; 
+          color: var(--primary-text-color);
+        }
+        .card-content {
+          padding: 16px;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+        }
+        .avatar-container { 
+          display: flex; 
+          justify-content: center; 
+          align-items: center;
+          width: 100%;
+          height: var(--ha-card-height, auto); 
+          box-sizing: border-box;
+        }
+        .avatar-container svg {
+          width: 100%;
+          height: 100%;
+          object-fit: contain;
+        }
+        
+        /* 1. TOUT MASQUER PAR DÉFAUT */
+        .meteo-soleil, .meteo-pluie, .meteo-vent, 
+        .vetement-chaud, .vetement-tempere, .vetement-coupevent, 
+        .vetement-froid, .accessoire-bonnet { 
+          display: none; 
+        }
+        
+        /* 2. DÉVERROUILLAGE SÉCURISÉ (Parent avec préfixe state- -> Enfant calque SVG) */
+        .state-froid .vetement-froid { display: block !important; }
+        .state-tempere .vetement-tempere { display: block; }
+        .state-coupevent .vetement-coupevent { display: block; }
+        .state-chaud .vetement-chaud { display: block; }
+        .state-bonnet .accessoire-bonnet { display: block; }
+        
+        .state-soleil .meteo-soleil { display: block; }
+        .state-pluie .meteo-pluie { display: block; }
+        .state-vent .meteo-vent { display: block; }
+      </style>
 
-    return b`
-      <ha-card .header=${hasTitle ? this._config.title : undefined}>
+      <div class="card-container">
+        ${title.trim() !== "" ? `<div class="card-title">${title}</div>` : ''}
         <div class="card-content">
-          <div class="avatar-container ${activeClasses}" .innerHTML=${avatarSVG}>
+          <div class="avatar-container ${activeClasses}">
+            ${avatarSVG}
           </div>
         </div>
-      </ha-card>
-    `;
-  }
-
-  static get styles() {
-    return i$3`
-      :host {
-        display: block;
-      }
-      .card-content {
-        padding: 16px;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-      }
-      .avatar-container {
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        width: 100%;
-        height: var(--ha-card-height, auto);
-        box-sizing: border-box;
-      }
-      
-      .avatar-container svg {
-        width: 100%;
-        height: 100%;
-        object-fit: contain; 
-      }
-      
-      /* ==========================================
-         LOGIQUE VISUELLE DE SÉLECTION DES COUCHES
-         ========================================== */
-         
-      /* 1. Tout masquer par défaut */
-      .meteo-soleil, .meteo-pluie, .meteo-vent, 
-      .vetement-chaud, .vetement-tempere, .vetement-coupevent, 
-      .vetement-froid, .accessoire-bonnet { 
-        display: none; 
-      }
-
-      /* 2. Affichage direct si la classe est présente sur le conteneur parent */
-      .vetement-froid .vetement-froid { display: block; }
-      .vetement-tempere .vetement-tempere { display: block; }
-      .vetement-coupevent .vetement-coupevent { display: block; }
-      .vetement-chaud .vetement-chaud { display: block; }
-      
-      .accessoire-bonnet .accessoire-bonnet { display: block; }
-      
-      .meteo-soleil .meteo-soleil { display: block; }
-      .meteo-pluie .meteo-pluie { display: block; }
-      .meteo-vent .meteo-vent { display: block; }
+      </div>
     `;
   }
 }
 
 if (!customElements.get("avatar-weather-card")) {
   customElements.define("avatar-weather-card", AvatarWeatherCard);
-}
-
-const registerCard = () => {
-  window.customCards = window.customCards || [];
-  if (!window.customCards.some(c => c.type === "avatar-weather-card")) {
-    window.customCards.push({
-      type: "avatar-weather-card",
-      name: "Avatar Weather Card",
-      description: "Un personnage qui s'habille selon la météo.",
-      preview: true,
-    });
-  }
-};
-
-registerCard();
-if (window.loadCardHelpers) {
-  registerCard();
 }
