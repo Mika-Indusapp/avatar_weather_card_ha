@@ -154,23 +154,24 @@ class AvatarWeatherCard extends HTMLElement {
           object-fit: contain;
         }
         
-        /* 1. TOUT MASQUER PAR DÉFAUT */
+        /* 1. TOUT MASQUER PAR DÉFAUT (Le !important écrase le display:inline d'Inkscape) */
         .meteo-soleil, .meteo-pluie, .meteo-vent, 
         .vetement-chaud, .vetement-tempere, .vetement-coupevent, 
         .vetement-froid, .accessoire-bonnet { 
-          display: none; 
+          display: none !important; 
         }
         
-        /* 2. DÉVERROUILLAGE SÉCURISÉ (Parent avec préfixe state- -> Enfant calque SVG) */
+        /* 2. RÉAFFICHAGE CONDITIONNEL */
         .state-froid .vetement-froid { display: block !important; }
-        .state-tempere .vetement-tempere { display: block; }
-        .state-coupevent .vetement-coupevent { display: block; }
-        .state-chaud .vetement-chaud { display: block; }
-        .state-bonnet .accessoire-bonnet { display: block; }
+        .state-tempere .vetement-tempere { display: block !important; }
+        .state-coupevent .vetement-coupevent { display: block !important; }
+        .state-chaud .vetement-chaud { display: block !important; }
+        .state-bonnet .accessoire-bonnet { display: block !important; }
         
-        .state-soleil .meteo-soleil { display: block; }
-        .state-pluie .meteo-pluie { display: block; }
-        .state-vent .meteo-vent { display: block; }
+        .state-soleil .meteo-soleil { display: block !important; }
+        .state-pluie .meteo-pluie { display: block !important; }
+        .state-vent .meteo-vent { display: block !important; }
+
       </style>
 
       <div class="card-container">
