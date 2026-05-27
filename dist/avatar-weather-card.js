@@ -203,37 +203,62 @@ const avatarSVG = `
 //          LOGIQUE MÉTIER DE L'AVATAR
 // ==========================================
 
-function getWeatherState(hass, config) {
+function getWeatherData(hass, config) {
   const entityId = config.entity;
   if (!entityId || !hass.states[entityId]) return null;
   const stateObj = hass.states[entityId];
 
-  let weatherState = stateObj.state;
+  let condition = stateObj.state;
+  let temperature = parseFloat(stateObj.state === 'unknown' ? 0 : stateObj.properties?.temperature || stateObj.attributes.temperature || 0);
+  
   const targetDay = parseInt(config.forecast_day || "0", 10);
 
+  // Si on cherche J+1 ou J+2, on va fouiller dans les prévisions
   if (targetDay > 0 && stateObj.attributes.forecast && stateObj.attributes.forecast.length >= targetDay) {
-    weatherState = stateObj.attributes.forecast[targetDay - 1].condition;
+    const forecast = stateObj.attributes.forecast[targetDay - 1];
+    condition = forecast.condition;
+    // On prend la température maximale prévue pour la journée cible
+    temperature = parseFloat(forecast.temperature);
   }
-  return weatherState;
+
+  return { condition, temperature };
 }
 
-function getWeatherClass(weatherState) {
-  if (!weatherState) return 'temperate';
-  const mapping = {
-    'sunny': 'sunny',
-    'clear-night': 'sunny',
-    'rainy': 'rainy',
-    'pouring': 'rainy',
-    'hail': 'rainy',
-    'snowy': 'snowy',
-    'snowy-rainy': 'snowy',
-    'windy': 'windy',
-    'windy-variant': 'windy',
-    'cloudy': 'temperate',
-    'partlycloudy': 'temperate',
-    'fog': 'temperate'
-  };
-  return mapping[weatherState] || 'temperate';
+function generateAvatarClasses(condition, temp) {
+  let classes = [];
+
+  // 1. Logique des vêtements de base selon la température
+  if (temp < 10) {
+    classes.push('vetement-froid');
+  } else if (temp >= 10 && temp <= 20) {
+    // Règle spéciale : si du vent est prévu entre 10 et 20°C, on met le coupe-vent
+    if (condition === 'windy' || condition === 'windy-variant') {
+      classes.push('vetement-coupevent');
+    } else {
+      classes.push('vetement-tempere');
+    }
+  } else if (temp > 20) {
+    classes.push('vetement-chaud');
+  }
+
+  // 2. Ajout de l'accessoire bonnet si en dessous de 5°C
+  if (temp < 5) {
+    classes.push('accessoire-bonnet');
+  }
+
+  // 3. Ajout des décors météo selon le statut de l'entité
+  if (condition === 'sunny' || condition === 'clear-night') {
+    classes.push('meteo-soleil');
+  }
+  if (condition === 'rainy' || condition === 'pouring' || condition === 'hail') {
+    classes.push('meteo-pluie');
+  }
+  if (condition === 'windy' || condition === 'windy-variant') {
+    classes.push('meteo-vent');
+  }
+
+  // Retourne la liste des classes séparées par un espace (ex: "vetement-froid accessoire-bonnet meteo-soleil")
+  return classes.join(' ');
 }
 
 // ==========================================
@@ -284,16 +309,20 @@ class AvatarWeatherCard extends i {
       `;
     }
 
-    const weatherState = getWeatherState(this.hass, this._config);
-    const weatherClass = getWeatherClass(weatherState);
+    // Récupération des données météo calculées (température + statut)
+    const weatherData = getWeatherData(this.hass, this._config);
+    
+    let activeClasses = "";
+    if (weatherData) {
+      activeClasses = generateAvatarClasses(weatherData.condition, weatherData.temperature);
+    }
+
     const hasTitle = this._config.title && this._config.title.trim() !== "";
 
-    // LA SOLUTION EST ICI : Utilisation de .innerHTML natif pour injecter le SVG
-    // Plus besoin de unsafeHTML !
     return b`
       <ha-card .header=${hasTitle ? this._config.title : undefined}>
         <div class="card-content">
-          <div class="avatar-container state-${weatherClass}" .innerHTML=${avatarSVG}>
+          <div class="avatar-container ${activeClasses}" .innerHTML=${avatarSVG}>
           </div>
         </div>
       </ha-card>
@@ -314,22 +343,40 @@ class AvatarWeatherCard extends i {
       .avatar-container {
         display: flex;
         justify-content: center;
+        align-items: center;
         width: 100%;
-        max-width: 250px;
-        height: auto;
+        height: var(--ha-card-height, auto);
+        box-sizing: border-box;
       }
       
+      .avatar-container svg {
+        width: 100%;
+        height: 100%;
+        object-fit: contain; 
+      }
+      
+      /* ==========================================
+         LOGIQUE VISUELLE DE SÉLECTION DES COUCHES
+         ========================================== */
+         
+      /* 1. Tout masquer par défaut */
       .meteo-soleil, .meteo-pluie, .meteo-vent, 
       .vetement-chaud, .vetement-tempere, .vetement-coupevent, 
       .vetement-froid, .accessoire-bonnet { 
         display: none; 
       }
 
-      .state-sunny .meteo-soleil, .state-sunny .vetement-chaud { display: block; }
-      .state-temperate .vetement-tempere { display: block; }
-      .state-windy .vetement-coupevent, .state-windy .meteo-vent { display: block; }
-      .state-rainy .meteo-pluie, .state-rainy .vetement-tempere { display: block; }
-      .state-snowy .vetement-froid, .state-snowy .accessoire-bonnet { display: block; }
+      /* 2. Affichage direct si la classe est présente sur le conteneur parent */
+      .vetement-froid .vetement-froid { display: block; }
+      .vetement-tempere .vetement-tempere { display: block; }
+      .vetement-coupevent .vetement-coupevent { display: block; }
+      .vetement-chaud .vetement-chaud { display: block; }
+      
+      .accessoire-bonnet .accessoire-bonnet { display: block; }
+      
+      .meteo-soleil .meteo-soleil { display: block; }
+      .meteo-pluie .meteo-pluie { display: block; }
+      .meteo-vent .meteo-vent { display: block; }
     `;
   }
 }
