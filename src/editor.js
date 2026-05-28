@@ -44,6 +44,11 @@ export class AvatarWeatherCardEditor extends LitElement {
             ]
           }
         }
+      },
+      {
+        name: "debug",
+        label: "Activer le mode Debug (Diagnostic)",
+        selector: { boolean: {} }
       }
     ];
 
