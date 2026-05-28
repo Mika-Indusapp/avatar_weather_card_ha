@@ -565,7 +565,11 @@ function generateAvatarClasses(condition, temp) {
       classes.push('state-tempere');
     }
   } else if (temp > 20) {
-    classes.push('state-chaud');
+    if (condition === 'rainy' || condition === 'pouring' || condition === 'hail') {
+      classes.push('state-tempere');
+    } else {
+      classes.push('state-chaud');
+    }
   }
 
   if (temp < 5) {
