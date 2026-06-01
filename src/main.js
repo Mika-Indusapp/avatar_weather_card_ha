@@ -7,37 +7,9 @@ if (!window.customCards.some(c => c.type === "avatar-weather-card")) {
   window.customCards.push({
     type: "avatar-weather-card",
     name: "Avatar Weather Card",
-    description: "Un personnage qui s'habille selon la météo.",
+    description: "Un ou plusieurs personnages qui s'habillent selon la météo.",
     preview: true,
   });
-}
-
-// Extraction robuste des données météo
-function getWeatherData(hass, config) {
-  const entityId = config.entity;
-  if (!entityId || !hass.states[entityId]) return null;
-  const stateObj = hass.states[entityId];
-
-  let condition = stateObj.state;
-  let temperature = 0;
-
-  if (stateObj.attributes && stateObj.attributes.temperature !== undefined) {
-    temperature = parseFloat(stateObj.attributes.temperature);
-  } else if (!isNaN(parseFloat(stateObj.state))) {
-    temperature = parseFloat(stateObj.state);
-  }
-  
-  const targetDay = parseInt(config.forecast_day || "0", 10);
-
-  if (targetDay > 0 && stateObj.attributes && stateObj.attributes.forecast && stateObj.attributes.forecast.length >= targetDay) {
-    const forecast = stateObj.attributes.forecast[targetDay - 1];
-    condition = forecast.condition;
-    temperature = parseFloat(forecast.temperature);
-  }
-
-  if (isNaN(temperature)) temperature = 15;
-
-  return { condition, temperature };
 }
 
 // Génération des classes d'état
@@ -90,7 +62,14 @@ class AvatarWeatherCard extends HTMLElement {
   }
 
   static getStubConfig() {
-    return { entity: "", title: "", forecast_day: "0", debug: false };
+    return { 
+      entity: "", 
+      title: "", 
+      show_today: true,
+      show_tomorrow: false, 
+      show_dany: false, 
+      debug: false 
+    };
   }
   
   setConfig(config) {
@@ -150,32 +129,66 @@ class AvatarWeatherCard extends HTMLElement {
       return;
     }
 
-    const targetDay = parseInt(this.config.forecast_day || "0", 10);
-
-    // Initialisation des valeurs par défaut (J+0)
-    let condition = stateObj.state;
-    let temperature = stateObj.attributes.temperature !== undefined ? parseFloat(stateObj.attributes.temperature) : 0;
-
-    // Si on cherche J+1 ou J+2 et qu'on a bien reçu les données de l'abonnement
-    if (this._forecastData && this._forecastData.length > targetDay) {
-      const forecast = this._forecastData[targetDay];
-      condition = forecast.condition;
-      temperature = forecast.temperature_max !== undefined ? parseFloat(forecast.temperature_max) : parseFloat(forecast.temperature);
-    }
-
-    if (isNaN(temperature)) temperature = 15;
-
-    const activeClasses = generateAvatarClasses(condition, temperature);
     const title = this.config.title || '';
     const isDebugActive = this.config.debug === true;
+
+    // 1. Déterminer quelles journées doivent être affichées (Défaut sur Aujourd'hui si rien n'est coché)
+    const daysToRender = [];
+    if (this.config.show_today !== false) daysToRender.push({ index: 0, label: "Aujourd'hui" });
+    if (this.config.show_tomorrow === true) daysToRender.push({ index: 1, label: "Demain" });
+    if (this.config.show_dany === true) daysToRender.push({ index: 2, label: "Après-demain" });
+    
+    if (daysToRender.length === 0) {
+      daysToRender.push({ index: 0, label: "Aujourd'hui" });
+    }
+
+    // 2. Générer le HTML pour chaque avatar demandé
+    let avatarsHTML = "";
+    let debugHTML = "";
+
+    daysToRender.forEach(day => {
+      let condition = stateObj.state;
+      let temperature = stateObj.attributes.temperature !== undefined ? parseFloat(stateObj.attributes.temperature) : 0;
+
+      // Extraction depuis le tableau de prévisions de Home Assistant
+      if (this._forecastData && this._forecastData.length > day.index) {
+        const forecast = this._forecastData[day.index];
+        condition = forecast.condition;
+        temperature = forecast.temperature_max !== undefined ? parseFloat(forecast.temperature_max) : parseFloat(forecast.temperature);
+      }
+      if (isNaN(temperature)) temperature = 15;
+
+      const activeClasses = generateAvatarClasses(condition, temperature);
+
+      // Structure d'une colonne d'avatar (Conteneur + Légende jour + SVG)
+      avatarsHTML += `
+        <div class="avatar-column">
+          <div class="avatar-day-label">${day.label}</div>
+          <div class="avatar-container ${activeClasses}">
+            ${avatarSVG}
+          </div>
+        </div>
+      `;
+
+      // Accumulation des textes de debug pour le panneau inférieur
+      if (isDebugActive) {
+        debugHTML += `
+          <div style="margin-bottom: 6px; border-bottom: 1px dotted rgba(0,0,0,0.1); padding-bottom: 4px;">
+            <strong>• ${day.label} (Index ${day.index}) :</strong><br>
+            Statut : "${condition}" | Temp Max : ${temperature.toFixed(1)}°C<br>
+            Classes : [ ${activeClasses} ]
+          </div>
+        `;
+      }
+    });
 
     this.shadowRoot.innerHTML = `
       <style>
         :host { 
-          display: flex;
-          flex-direction: column;
+          display: block;
           height: 100%;
         }
+        
         .card-container { 
           background: var(--ha-card-background, var(--card-background-color, white)); 
           border-radius: var(--ha-card-border-radius, 12px); 
@@ -184,87 +197,112 @@ class AvatarWeatherCard extends HTMLElement {
           box-sizing: border-box;
           display: flex;
           flex-direction: column;
-          height: 100%;
-          width: 100%;
-          flex: 1 1 auto;
+          
+          height: var(--ha-card-height, auto);
+          max-height: 100%;
+          overflow: hidden;
         }
+        
         .card-title { 
           font-size: 16px; 
-          padding: 16px 16px 0px 16px;
+          padding: 12px 16px 0px 16px; /* Légère réduction du padding du titre principal */
           font-weight: bold; 
           color: var(--primary-text-color);
+          flex-shrink: 0;
         }
-        .card-content {
-          padding: 16px;
+        
+        .card-content { 
+          padding: 4px; /* ASTUCE 1 : On passe de 16px à 4px pour libérer de la place tout autour */
+          display: flex; 
+          justify-content: space-around; 
+          align-items: stretch; 
+          
+          flex: 1 1 var(--ha-card-height, auto); 
+          min-height: 0;
+          height: var(--ha-card-height, auto);
+          max-height: 100%;
+        }
+        
+        .avatar-column {
           display: flex;
-          justify-content: center;
+          flex-direction: column;
           align-items: center;
-          flex: 1 1 auto;
+          justify-content: center;
+          flex: 1 1 0; 
+          min-width: 0;
+          height: 100%;
+          max-height: 100%;
+          padding: 0; /* ASTUCE 2 : On supprime les marges horizontales des colonnes */
         }
+        
+        .avatar-day-label {
+          font-size: 12px;
+          font-weight: 500;
+          color: var(--secondary-text-color);
+          margin-bottom: 2px; /* ASTUCE 3 : On rapproche l'étiquette pour faire grandir le SVG */
+          flex-shrink: 0;
+          text-align: center;
+        }
+        
         .avatar-container { 
           display: flex; 
           justify-content: center; 
-          align-items: center;
-          width: 100%;
-          height: 100%; 
-          box-sizing: border-box;
-        }
-        .avatar-container svg {
-          width: 100%;
+          align-items: center; 
+          width: 100%; 
           height: 100%;
+          max-height: 100%;
+          box-sizing: border-box;
+          min-height: 0;
+        }
+        
+        .avatar-container svg { 
+          display: block;
+          width: 100%; 
+          height: 100%; 
+          max-width: 100%;
+          max-height: 100%;
           object-fit: contain;
         }
         
-        /* ZONE DE DEBUG SOUHAITÉE */
-        .debug-panel {
-          background-color: rgba(0, 0, 0, 0.05);
-          border-top: 1px dashed var(--divider-color, #e0e0e0);
-          padding: 10px;
-          font-family: monospace;
-          font-size: 11px;
+        .debug-panel { 
+          background-color: rgba(0, 0, 0, 0.05); 
+          border-top: 1px dashed var(--divider-color, #e0e0e0); 
+          padding: 10px; 
+          font-family: monospace; 
+          font-size: 11px; 
           color: var(--secondary-text-color);
-        }
-        .debug-title {
-          font-weight: bold;
-          color: var(--warning-color, #ff9800);
-          margin-bottom: 4px;
-          text-transform: uppercase;
+          flex-shrink: 0;
+          max-height: 150px;
+          overflow-y: auto;
         }
         
-        /* LOGIQUE DES CALQUES SVG (Inkscape protect) */
+        .debug-title { font-weight: bold; color: var(--warning-color, #ff9800); margin-bottom: 6px; text-transform: uppercase; }
+        
+        /* Masquage Inkscape safe */
         .meteo-soleil, .meteo-pluie, .meteo-vent, 
         .vetement-chaud, .vetement-tempere, .vetement-coupevent, 
-        .vetement-froid, .accessoire-bonnet { 
-          display: none !important; 
-        }
+        .vetement-froid, .accessoire-bonnet { display: none !important; }
         
         .state-froid .vetement-froid { display: block !important; }
         .state-tempere .vetement-tempere { display: block !important; }
         .state-coupevent .vetement-coupevent { display: block !important; }
         .state-chaud .vetement-chaud { display: block !important; }
         .state-bonnet .accessoire-bonnet { display: block !important; }
-        
         .state-soleil .meteo-soleil { display: block !important; }
         .state-pluie .meteo-pluie { display: block !important; }
         .state-vent .meteo-vent { display: block !important; }
       </style>
 
       <div class="card-container">
-        ${title.trim() !== "" ? `<div class="card-title">${title}</div>` : ''}
-        <div class="card-content">
-          <div class="avatar-container ${activeClasses}">
-            ${avatarSVG}
-          </div>
+        ${title.trim() !== "" ? `<div class="card-title">${title}</div>` : ''}\n        <div class="card-content">
+          ${avatarsHTML}
         </div>
         
         ${isDebugActive ? `
           <div class="debug-panel">
-            <div class="debug-title">🔧 Données de Debug de l'Avatar</div>
-            <div>• Entité cible : ${entityId}</div>
-            <div>• Jour sélectionné : J+${targetDay}</div>
-            <div>• Statut extrait : "${condition}"</div>
-            <div>• Température calculée : ${temperature.toFixed(1)}°C</div>
-            <div>• Classes CSS actives : [ ${activeClasses} ]</div>
+            <div class="debug-title">🔧 Debug Multi-Avatars (get_forecasts)</div>
+            <div style="margin-bottom: 6px;">• Entité : ${entityId}</div>
+            ${debugHTML}
           </div>
         ` : ''}
       </div>

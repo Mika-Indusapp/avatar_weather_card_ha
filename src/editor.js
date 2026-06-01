@@ -33,18 +33,9 @@ export class AvatarWeatherCardEditor extends LitElement {
         name: "title", 
         selector: { text: {} } 
       },
-      {
-        name: "forecast_day",
-        selector: {
-          select: {
-            options: [
-              { value: "0", label: "Actuelle / Aujourd'hui" },
-              { value: "1", label: "Demain (Prévision J+1)" },
-              { value: "2", label: "Après-demain (Prévision J+2)" }
-            ]
-          }
-        }
-      },
+      { name: "show_today", label: "Afficher Aujourd'hui", selector: { boolean: {} } },
+      { name: "show_tomorrow", label: "Afficher Demain (J+1)", selector: { boolean: {} } },
+      { name: "show_dany", label: "Afficher Après-demain (J+2)", selector: { boolean: {} } },
       {
         name: "debug",
         label: "Activer le mode Debug (Diagnostic)",
